@@ -302,7 +302,7 @@ struct Socket
             Socket owned;
         }
         auto socket = Socket(SocketType.req);
-        const socketPtr = socket.handle;
+        const socket = socket.handle;
         assert (socketPtr != null);
 
         auto owner = SocketOwner(trusted!move(socket));
@@ -459,7 +459,7 @@ struct Socket
     void send(const ubyte[] data, bool more = false)
     {
         immutable flags = more ? ZMQ_SNDMORE : 0;
-        if (trusted!zmq_send(m_socket, data.ptr, data.length, flags) < 0) {
+        if (trusted!zmq_send(m_socket, &data[0], data.length, flags) < 0) {
             throw new ZmqException;
         }
     }
@@ -474,7 +474,7 @@ struct Socket
     bool trySend(const ubyte[] data, bool more = false)
     {
         immutable flags = ZMQ_DONTWAIT | (more ? ZMQ_SNDMORE : 0);
-        if (trusted!zmq_send(m_socket, data.ptr, data.length, flags) < 0) {
+        if (trusted!zmq_send(m_socket, &data[0], data.length, flags) < 0) {
             import core.stdc.errno;
             if (errno == EAGAIN) return false;
             else throw new ZmqException;
@@ -564,7 +564,7 @@ struct Socket
     void sendConst(immutable ubyte[] data, bool more = false)
     {
         immutable flags = more ? ZMQ_SNDMORE : 0;
-        if (trusted!zmq_send_const(m_socket, data.ptr, data.length, flags) < 0) {
+        if (trusted!zmq_send_const(m_socket, &data[0], data.length, flags) < 0) {
             throw new ZmqException;
         }
     }
@@ -579,7 +579,7 @@ struct Socket
     bool trySendConst(immutable ubyte[] data, bool more = false)
     {
         immutable flags = ZMQ_DONTWAIT | (more ? ZMQ_SNDMORE : 0);
-        if (trusted!zmq_send_const(m_socket, data.ptr, data.length, flags) < 0) {
+        if (trusted!zmq_send_const(m_socket, &data[0], data.length, flags) < 0) {
             import core.stdc.errno;
             if (errno == EAGAIN) return false;
             else throw new ZmqException;
@@ -633,7 +633,7 @@ struct Socket
     /// ditto
     Tuple!(size_t, bool) tryReceive(ubyte[] data)
     {
-        immutable len = trusted!zmq_recv(m_socket, data.ptr, data.length, ZMQ_DONTWAIT);
+        immutable len = trusted!zmq_recv(m_socket, &data[0], data.length, ZMQ_DONTWAIT);
         if (len >= 0) {
             import std.conv;
             return typeof(return)(to!size_t(len), true);
@@ -1651,7 +1651,7 @@ private:
     {
         static assert (T.sizeof == 1);
         auto len = buf.length;
-        if (zmq_getsockopt(m_socket, option, buf.ptr, &len) != 0) {
+        if (zmq_getsockopt(m_socket, option, &buf[0], &len) != 0) {
             throw new ZmqException;
         }
         return buf[0 .. len];
@@ -1659,7 +1659,7 @@ private:
 
     void setArrayOption()(int option, const void[] value)
     {
-        if (trusted!zmq_setsockopt(m_socket, option, value.ptr, value.length) != 0) {
+        if (trusted!zmq_setsockopt(m_socket, option, &value[0], value.length) != 0) {
             throw new ZmqException;
         }
     }
@@ -1889,7 +1889,7 @@ uint poll(zmq_pollitem_t[] items, Duration timeout = infiniteDuration)
 {
     import std.conv: to;
     const n = trusted!zmq_poll(
-        items.ptr,
+        &items[0],
         to!int(items.length),
         timeout == infiniteDuration ? -1 : to!int(timeout.total!"msecs"()));
     if (n < 0) throw new ZmqException;
@@ -3374,7 +3374,7 @@ char[] z85Encode(ubyte[] data, char[] dest)
     import core.exception: RangeError;
     immutable len = 5 * data.length / 4;
     if (dest.length < len+1) throw new RangeError;
-    if (trusted!zmq_z85_encode(dest.ptr, data.ptr, data.length) == null) {
+    if (trusted!zmq_z85_encode(&dest[0], &data[0], data.length) == null) {
         throw new ZmqException;
     }
     return dest[0 .. len];
@@ -3436,7 +3436,7 @@ ubyte[] z85Decode(char[] text, ubyte[] dest)
     immutable len = 4 * text.length/5;
     if (dest.length < len) throw new RangeError;
     if (text[$-1] != '\0') text ~= '\0';
-    if (trusted!zmq_z85_decode(dest.ptr, text.ptr) == null) {
+    if (trusted!zmq_z85_decode(&dest[0], &text[0]) == null) {
         throw new ZmqException;
     }
     return dest[0 .. len];
@@ -3448,7 +3448,7 @@ ubyte[] z85Decode(char[] text)
     return z85Decode(text, new ubyte[4*text.length/5]);
 }
 
-debug (WithCurveTests) @system unittest // @system because of assertThrown
+debug (WithCurveTests) @safe unittest
 {
     // TODO: Make data immutable when we update to ZMQ 4.1
     auto text = "HelloWorld".dup;
@@ -3459,7 +3459,7 @@ debug (WithCurveTests) @system unittest // @system because of assertThrown
     auto buffer = new ubyte[8];
     auto result = z85Decode(text, buffer);
     assert (result == decoded);
-    assert (buffer.ptr == result.ptr);
+    assert (&buffer[0] == &result[0]);
 
     import core.exception: RangeError;
     import std.exception: assertThrown;
@@ -3499,7 +3499,7 @@ Tuple!(char[], "publicKey", char[], "secretKey")
     static if (ZMQ_VERSION < ZMQ_MAKE_VERSION(4, 1, 0)) {
         import deimos.zmq.utils: zmq_curve_keypair;
     }
-    if (trusted!zmq_curve_keypair(publicKeyBuf.ptr, secretKeyBuf.ptr) != 0) {
+    if (trusted!zmq_curve_keypair(&publicKeyBuf[0], &secretKeyBuf[0]) != 0) {
         throw new ZmqException;
     }
     return typeof(return)(publicKeyBuf[0 .. 40], secretKeyBuf[0 .. 40]);
@@ -3915,7 +3915,7 @@ const(char)* zeroTermString(const char[] s) nothrow
     if (buf.length < len) buf.length = max(len, 1023);
     buf[0 .. s.length] = s;
     buf[s.length] = '\0';
-    return buf.ptr;
+    return &buf[0];
 }
 
 @system unittest
